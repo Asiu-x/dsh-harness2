@@ -1,0 +1,15 @@
+dsh-harness2
+Copyright 2026 Asiu-x
+
+This product includes software, prompt text, and method descriptions adapted
+from Harness² (https://github.com/google-research/harness2), Copyright 2026
+Google LLC, licensed under the Apache License, Version 2.0.
+
+Reference: Xu, Ruiyao; Chen, Yanfei; CuiZhu, Zhongying; Dalvi Mishra, Bhavana;
+Ming, Yifei; Yu, Han; Han, Rujun; Lee, Chen-Yu; Pfister, Tomas.
+"Harness²: Recursive Agent Harnessing for an Open World."
+arXiv:2610.14224, 2026. https://arxiv.org/abs/2610.14224
+
+Harness² is a research release and is not an officially supported Google
+product. dsh-harness2 is an independent DeepSeek Harness integration and is
+not affiliated with or endorsed by Google or DeepSeek.
