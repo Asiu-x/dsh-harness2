@@ -9,36 +9,22 @@
 // ("Harness²: Recursive Agent Harnessing for an Open World", arXiv:2610.14224).
 
 import path from 'node:path'
-import z from '@deepseek-ai/schemastery'
-import { defineTool } from '@deepseek-ai/dsh-tools'
-import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import { createUserMessage } from './lib/message.js'
 import { Harness2Runtime } from './lib/harness2.js'
 import { Store } from './lib/store.js'
-import { DEFAULT_MAX_ALWAYS_ON_CHARS } from './lib/surface.js'
+
+// Plain DSH tool definitions: no runtime dependency on @deepseek-ai/dsh-tools,
+// so installing the plugin never shadows the host profile's DSH packages.
+function defineTool(definition) {
+  return definition
+}
 
 export const name = 'dsh-harness2'
 
 export const inject = ['agents', 'agentDefaultModel', 'systemPrompt', 'tools']
 
-export const Config = z.object({
-  workspace: z.string().default(''),
-  dataDir: z.string().default('.dsh-harness2'),
-  maxAlwaysOnChars: z.number().default(DEFAULT_MAX_ALWAYS_ON_CHARS),
-  maxK: z.number().default(3),
-  mode: z.string().default('sequential'),
-  concurrency: z.number().default(2),
-  timeoutMinutes: z.number().default(20),
-  toolTimeoutMinutes: z.number().default(120),
-  maxWorkspaceMB: z.number().default(50),
-  workspaceIsolation: z.string().default('copy'),
-  selection: z.boolean().default(true),
-  reflection: z.boolean().default(true),
-  libraryLessons: z.number().default(3),
-  libraryEntries: z.number().default(8),
-  model: z.string().default(''),
-  provider: z.string().default(''),
-  reasoningEffort: z.string().default(''),
-})
+// Configuration is intentionally plain JSON. Defaults live in lib/harness2.js;
+// a profile can override any of them on the harness2 plugin entry.
 
 function log(message) {
   try {
@@ -92,45 +78,49 @@ export function apply(ctx, rawConfig) {
       description:
         'Refine the current workspace harness with Harness² (Google Research): run baseline probes, propose invariant and domain edits, probe them on the same task, compose an improved harness, select an output anonymously, and reflect the lesson into a per-domain library. This spawns several real child agents and can be expensive; k=1 is the default.',
       parameters: {
-        task: {
-          type: 'string',
-          required: true,
-          description:
-            'The representative task to refine on. It is run several times in isolated copies of the workspace.',
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          task: {
+            type: 'string',
+            description:
+              'The representative task to refine on. It is run several times in isolated copies of the workspace.',
+          },
+          domain: {
+            type: 'string',
+            description: 'Library domain, e.g. "legal", "procurement", "data-analysis". Defaults to general.',
+          },
+          k: {
+            type: 'number',
+            description: 'Task-level recursion budget, 1–3. 1 is one Propose–Probe–Compose step.',
+          },
+          mode: {
+            type: 'string',
+            enum: ['sequential', 'parallel'],
+            description:
+              'sequential refines deeper; parallel explores wider with 2k candidates and k compositions.',
+          },
+          isolation: {
+            type: 'string',
+            enum: ['copy', 'shared'],
+            description:
+              'copy runs each probe in a fresh copy of the workspace (default and safest). shared runs in place and can interfere.',
+          },
+          workspace: {
+            type: 'string',
+            description:
+              'Workspace to refine. Defaults to the session workspace. A different directory switches this plugin instance to that workspace for later status/reset calls.',
+          },
         },
-        domain: {
-          type: 'string',
-          description: 'Library domain, e.g. "legal", "procurement", "data-analysis". Defaults to general.',
-        },
-        k: {
-          type: 'number',
-          description: 'Task-level recursion budget, 1–3. 1 is one Propose–Probe–Compose step.',
-        },
-        mode: {
-          type: 'string',
-          enum: ['sequential', 'parallel'],
-          description:
-            'sequential refines deeper; parallel explores wider with 2k candidates and k compositions.',
-        },
-        isolation: {
-          type: 'string',
-          enum: ['copy', 'shared'],
-          description:
-            'copy runs each probe in a fresh copy of the workspace (default and safest). shared runs in place and can interfere.',
-        },
-        workspace: {
-          type: 'string',
-          description:
-            'Workspace to refine. Defaults to the session workspace. A different directory switches this plugin instance to that workspace for later status/reset calls.',
-        },
+        required: ['task'],
       },
       output: {
         schema: {
           type: 'object',
           additionalProperties: false,
           properties: {
-            runId: { type: 'string', required: true },
-            adopted: { type: 'boolean', required: true },
+            runId: { type: 'string' },
+            adopted: { type: 'boolean' },
             winner: { type: 'string' },
             winnerIsBase: { type: 'boolean' },
             mode: { type: 'string' },
@@ -140,8 +130,9 @@ export function apply(ctx, rawConfig) {
             why: { type: 'string' },
             runDir: { type: 'string' },
             progressLog: { type: 'string' },
-            summary: { type: 'string', required: true },
+            summary: { type: 'string' },
           },
+          required: ['runId', 'adopted', 'summary'],
         },
         render: (_args, value) => [{ type: 'text', text: value.summary }],
         presentationMeta: (_args, value) => ({
@@ -224,15 +215,16 @@ export function apply(ctx, rawConfig) {
       name: 'harness2_status',
       description:
         'Show the adopted Harness² harness, its components, the per-domain experience library, and the latest run.',
-      parameters: {},
+      parameters: { type: 'object', additionalProperties: false },
       output: {
         schema: {
           type: 'object',
           additionalProperties: false,
           properties: {
             adopted: { type: 'boolean' },
-            text: { type: 'string', required: true },
+            text: { type: 'string' },
           },
+          required: ['text'],
         },
         render: (_args, value) => [{ type: 'text', text: value.text }],
       },
@@ -262,19 +254,24 @@ export function apply(ctx, rawConfig) {
       description:
         'Archive the adopted Harness² harness into the library and restore the seed harness. Requires confirm=true.',
       parameters: {
-        confirm: {
-          type: 'boolean',
-          required: true,
-          description: 'Must be true; the current harness is archived before it is replaced.',
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          confirm: {
+            type: 'boolean',
+            description: 'Must be true; the current harness is archived before it is replaced.',
+          },
         },
+        required: ['confirm'],
       },
       output: {
         schema: {
           type: 'object',
           additionalProperties: false,
           properties: {
-            text: { type: 'string', required: true },
+            text: { type: 'string' },
           },
+          required: ['text'],
         },
         render: (_args, value) => [{ type: 'text', text: value.text }],
       },
