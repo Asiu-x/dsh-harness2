@@ -3,3 +3,5 @@ node_modules/
 .DS_Store
 .dsh-harness2/
 .dsh-harness2-v2/
+*.tgz
+
