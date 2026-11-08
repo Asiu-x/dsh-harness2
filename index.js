@@ -1,321 +1,85 @@
-// dsh-harness2 — Harness² recursive agent harnessing for DeepSeek Harness.
-//
-// Registers three model tools and a /harness2 command:
-//   harness2_refine  run Propose–Probe–Compose, select, reflect, adopt
-//   harness2_status  inspect the adopted harness and domain library
-//   harness2_reset   archive and restore the seed harness
-//
-// Apache-2.0. The method comes from google-research/harness2
-// ("Harness²: Recursive Agent Harnessing for an Open World", arXiv:2610.14224).
-
+// DSH-native port of Google Harness². Apache-2.0; see NOTICE and docs/method.md.
 import path from 'node:path'
-import { createUserMessage } from './lib/message.js'
+import { promises as fs } from 'node:fs'
 import { Harness2Runtime } from './lib/harness2.js'
-import { Store } from './lib/store.js'
-
-// Plain DSH tool definitions: no runtime dependency on @deepseek-ai/dsh-tools,
-// so installing the plugin never shadows the host profile's DSH packages.
-function defineTool(definition) {
-  return definition
-}
-
 export const name = 'dsh-harness2'
-
 export const inject = ['agents', 'agentDefaultModel', 'systemPrompt', 'tools']
-
-// Configuration is intentionally plain JSON. Defaults live in lib/harness2.js;
-// a profile can override any of them on the harness2 plugin entry.
-
-function log(message) {
-  try {
-    console.log(`[dsh-harness2] ${message}`)
-  } catch {}
-}
-
-function summaryText(value) {
-  const lines = [
-    value.adopted
-      ? `Adopted \`${value.winner}\` as the current Harness² harness.`
-      : 'Kept the current harness; no candidate beat the base in selection.',
-    '',
-    `- run: \`${value.runId}\``,
-    `- mode: ${value.mode}, k: ${value.k}, domain: ${value.domain}`,
-    `- harness: ${value.harness}`,
-    `- winner: ${value.winner || 'none'}${value.winnerIsBase ? ' (base)' : ''}`,
-    `- proof: \`${value.progressLog}\``,
-  ]
-  if (value.why) lines.push('', `Why: ${value.why}`)
-  if (value.experience?.cue) lines.push('', `Lesson cue: ${value.experience.cue}`)
-  if (value.experience?.lesson) lines.push(`Lesson: ${value.experience.lesson}`)
-  lines.push('', `Inspect the run at \`${value.runDir}\`.`)
-  return lines.join('\n')
-}
-
-function asString(value) {
-  return String(value ?? '').trim()
-}
-
-export function apply(ctx, rawConfig) {
-  const config = rawConfig ?? {}
-  const runtime = new Harness2Runtime(ctx, config, { log })
-  runtime.ready.catch((error) => log(`init failed: ${error?.message || error}`))
-
-  // The adopted harness is a dynamic prompt section: after adoption the next
-  // model step sees it, including lessons from the domain library.
-  ctx.effect(
-    () =>
-      ctx.systemPrompt.section({
-        name: 'harness2:adopted',
-        order: 10_050,
-        text: () => runtime.adoptedText,
-      }),
-    'dsh-harness2: adopted harness section',
-  )
-
-  ctx.tools.register(
-    defineTool({
-      name: 'harness2_refine',
-      description:
-        'Refine the current workspace harness with Harness² (Google Research): run baseline probes, propose invariant and domain edits, probe them on the same task, compose an improved harness, select an output anonymously, and reflect the lesson into a per-domain library. This spawns several real child agents and can be expensive; k=1 is the default.',
-      parameters: {
-        type: 'object',
-        additionalProperties: false,
-        properties: {
-          task: {
-            type: 'string',
-            description:
-              'The representative task to refine on. It is run several times in isolated copies of the workspace.',
-          },
-          domain: {
-            type: 'string',
-            description: 'Library domain, e.g. "legal", "procurement", "data-analysis". Defaults to general.',
-          },
-          k: {
-            type: 'number',
-            description: 'Task-level recursion budget, 1–3. 1 is one Propose–Probe–Compose step.',
-          },
-          mode: {
-            type: 'string',
-            enum: ['sequential', 'parallel'],
-            description:
-              'sequential refines deeper; parallel explores wider with 2k candidates and k compositions.',
-          },
-          isolation: {
-            type: 'string',
-            enum: ['copy', 'shared'],
-            description:
-              'copy runs each probe in a fresh copy of the workspace (default and safest). shared runs in place and can interfere.',
-          },
-          workspace: {
-            type: 'string',
-            description:
-              'Workspace to refine. Defaults to the session workspace. A different directory switches this plugin instance to that workspace for later status/reset calls.',
-          },
-        },
-        required: ['task'],
-      },
-      output: {
-        schema: {
-          type: 'object',
-          additionalProperties: false,
-          properties: {
-            runId: { type: 'string' },
-            adopted: { type: 'boolean' },
-            winner: { type: 'string' },
-            winnerIsBase: { type: 'boolean' },
-            mode: { type: 'string' },
-            k: { type: 'integer' },
-            domain: { type: 'string' },
-            harness: { type: 'string' },
-            why: { type: 'string' },
-            runDir: { type: 'string' },
-            progressLog: { type: 'string' },
-            summary: { type: 'string' },
-          },
-          required: ['runId', 'adopted', 'summary'],
-        },
-        render: (_args, value) => [{ type: 'text', text: value.summary }],
-        presentationMeta: (_args, value) => ({
-          runId: value.runId,
-          adopted: value.adopted,
-          winner: value.winner,
-          runDir: value.runDir,
-        }),
-      },
-      timeoutMs: Math.max(1, Number(config.toolTimeoutMinutes) || 120) * 60_000,
+export function apply(ctx, config = {}) {
+  const runtime = new Harness2Runtime(ctx, config)
+  const workspace = async (agent) => {
+    const cwd = agent?.session?.header?.cwd
+    if (!cwd) throw new Error('Harness² requires an explicit session workspace')
+    return fs.realpath(cwd)
+  }
+  const tool = (name, description, parameters, execute) =>
+    ctx.tools.register({
+      name,
+      description,
+      parameters,
+      timeoutMs: 24 * 60 * 60 * 1000,
       isConcurrencySafe: () => false,
-      async execute(args, exec) {
-        await runtime.ready
-        const task = asString(args.task)
-        if (!task) throw new Error('`task` is required')
-        const requestedWorkspace = asString(args.workspace)
-        if (requestedWorkspace) {
-          const target = path.resolve(requestedWorkspace)
-          if (target !== runtime.workspace) {
-            log(`switching plugin workspace to ${target}`)
-            runtime.workspace = target
-            runtime.store = new Store(path.resolve(target, runtime.config.dataDir), {
-              maxAlwaysOnChars: runtime.config.maxAlwaysOnChars,
-            })
-            await runtime.store.ensure()
-            await runtime.refreshAdopted()
-          }
-        }
-        const summary = await runtime.refine({
-          task,
-          domain: asString(args.domain) || 'general',
-          k: args.k,
-          mode: asString(args.mode) || runtime.config.mode,
-          isolation: asString(args.isolation),
-          parentAgent: exec.agent,
-          signal: exec.signal,
-        })
-        const text = summaryText(summary)
-        if (summary.adopted && runtime.adoptedText) {
-          try {
-            exec.deferContext(
-              createUserMessage({
-                content: [
-                  {
-                    type: 'text',
-                    text:
-                      `# Harness² adoption\n\nThe workspace harness was refined and adopted (\`${summary.winner}\`). ` +
-                      'The following standing harness context applies to subsequent work in this session; ' +
-                      'do not repeat this message, just apply it.\n\n' +
-                      runtime.adoptedText,
-                  },
-                ],
-                source: { kind: 'plugin', plugin: 'dsh-harness2' },
-              }),
-            )
-          } catch (error) {
-            log(`could not defer adopted harness context: ${error?.message || error}`)
-          }
-        }
-        return {
-          runId: summary.runId,
-          adopted: summary.adopted,
-          winner: summary.winner || '',
-          winnerIsBase: summary.winnerIsBase,
-          mode: summary.mode,
-          k: summary.k,
-          domain: summary.domain,
-          harness: summary.harness,
-          why: summary.why || '',
-          runDir: summary.runDir,
-          progressLog: summary.progressLog,
-          summary: text,
-        }
-      },
-    }),
-  )
-
-  ctx.tools.register(
-    defineTool({
-      name: 'harness2_status',
-      description:
-        'Show the adopted Harness² harness, its components, the per-domain experience library, and the latest run.',
-      parameters: { type: 'object', additionalProperties: false },
+      execute,
       output: {
-        schema: {
-          type: 'object',
-          additionalProperties: false,
-          properties: {
-            adopted: { type: 'boolean' },
-            text: { type: 'string' },
-          },
-          required: ['text'],
-        },
-        render: (_args, value) => [{ type: 'text', text: value.text }],
-      },
-      async execute() {
-        await runtime.ready
-        const status = await runtime.status()
-        const lines = [
-          status.adopted
-            ? `Adopted harness: yes (${status.adoptedAt || 'unknown time'}, domain: ${status.domain})`
-            : 'Adopted harness: no — the seed harness is present but not active.',
-          `Harness: \`${status.harness.dir}\` · ${status.harness.inventory}`,
-          `Data: \`${status.dataDir}\``,
-        ]
-        if (status.latestRun) lines.push(`Latest run: ${status.latestRun}`)
-        lines.push('', `Library (${status.domain}): ${status.library.length} entr${status.library.length === 1 ? 'y' : 'ies'}`)
-        for (const entry of status.library.slice(-8)) {
-          lines.push(`- \`${entry.id}\` — ${entry.cue || entry.lesson || entry.inventory}`)
-        }
-        return { adopted: status.adopted, text: lines.join('\n') }
-      },
-    }),
-  )
-
-  ctx.tools.register(
-    defineTool({
-      name: 'harness2_reset',
-      description:
-        'Archive the adopted Harness² harness into the library and restore the seed harness. Requires confirm=true.',
-      parameters: {
-        type: 'object',
-        additionalProperties: false,
-        properties: {
-          confirm: {
-            type: 'boolean',
-            description: 'Must be true; the current harness is archived before it is replaced.',
-          },
-        },
-        required: ['confirm'],
-      },
-      output: {
-        schema: {
-          type: 'object',
-          additionalProperties: false,
-          properties: {
-            text: { type: 'string' },
-          },
-          required: ['text'],
-        },
-        render: (_args, value) => [{ type: 'text', text: value.text }],
-      },
-      async execute(args) {
-        if (args.confirm !== true) throw new Error('Set `confirm: true` to archive and reset the harness')
-        await runtime.ready
-        const result = await runtime.reset()
-        return {
-          text: `Reset to the seed harness. Archived previous harness (${result.archivedInventory}).`,
-        }
-      },
-    }),
-  )
-
-  ctx.inject(['commands'], (commandCtx) => {
-    commandCtx.commands.register({
-      name: 'harness2',
-      description: 'inspect or reset the Harness² improvement harness',
-      input: { hint: '[status|library|reset]' },
-      handler: async (invocation) => {
-        await runtime.ready
-        const input = asString(invocation?.input ?? invocation?.args ?? '')
-        if (input === 'reset') {
-          const result = await runtime.reset()
-          return {
-            kind: 'success',
-            text: `Harness² reset. Archived the previous harness (${result.archivedInventory}) and restored the seed.`,
-          }
-        }
-        const status = await runtime.status()
-        const lines = [
-          status.adopted
-            ? `Harness²: adopted (${status.adoptedAt || 'unknown'}, domain ${status.domain})`
-            : 'Harness²: seed only (no adopted harness)',
-          `Harness: ${status.harness.inventory}`,
-          `Library: ${status.library.length} entr${status.library.length === 1 ? 'y' : 'ies'} in ${status.domain}`,
-        ]
-        if (input === 'library') {
-          for (const entry of status.library) {
-            lines.push(`- ${entry.id} — ${entry.cue || entry.lesson || entry.inventory}`)
-          }
-        }
-        return { kind: 'success', text: lines.join('\n') }
+        schema: { type: 'object', additionalProperties: true },
+        render: (_args, value) => [
+          { type: 'text', text: JSON.stringify(value) },
+        ],
       },
     })
-  })
+  tool(
+    'harness2_refine',
+    'Run the reference Harness² method on an explicit task manifest. Executes the task repeatedly, learning a per-experiment library; does not change ordinary sessions.',
+    {
+      type: 'object',
+      properties: {
+        taskFile: { type: 'string' },
+        k: { type: 'integer', minimum: 1 },
+        mode: { type: 'string', enum: ['parallel', 'sequential'] },
+        seed: { type: 'integer' },
+      },
+      required: ['taskFile'],
+      additionalProperties: false,
+    },
+    async (args, exec) => {
+      const cwd = await workspace(exec.agent)
+      const file = path.resolve(cwd, args.taskFile)
+      const real = await fs.realpath(file)
+      if (!real.startsWith(cwd + path.sep))
+        throw new Error('Task manifest must be inside the session workspace')
+      const manifest = JSON.parse(await fs.readFile(real, 'utf8'))
+      return runtime.refine({
+        manifest,
+        workspace: cwd,
+        k: args.k,
+        mode: args.mode,
+        seed: args.seed,
+        parentAgent: exec.agent,
+        signal: exec.signal,
+      })
+    },
+  )
+  const params = {
+    type: 'object',
+    properties: { experiment: { type: 'string' } },
+    required: ['experiment'],
+    additionalProperties: false,
+  }
+  tool(
+    'harness2_status',
+    'Read an identified Harness² experiment without inference.',
+    params,
+    async (args, exec) =>
+      runtime.status({ ...args, workspace: await workspace(exec.agent) }),
+  )
+  tool(
+    'harness2_reset',
+    'Archive an identified experiment, retaining all original evidence.',
+    {
+      ...params,
+      properties: { ...params.properties, confirm: { type: 'boolean' } },
+      required: ['experiment', 'confirm'],
+    },
+    async (args, exec) =>
+      runtime.reset({ ...args, workspace: await workspace(exec.agent) }),
+  )
 }

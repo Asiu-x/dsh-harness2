@@ -13,3 +13,8 @@ arXiv:2610.14224, 2026. https://arxiv.org/abs/2610.14224
 Harness² is a research release and is not an officially supported Google
 product. dsh-harness2 is an independent DeepSeek Harness integration and is
 not affiliated with or endorsed by Google or DeepSeek.
+
+Local 0.2.0 port aligns method contracts and generated prompt assets to
+Google Research Harness² commit 6868817518876de8fd170c6a8354daca273b6191.
+lib/reference-prompts.json is derived from Google LLC's Apache-2.0 core/prompts.py.
+lib/assign-ids.py reproduces core/selection.py anonymous ordering with Python stdlib.

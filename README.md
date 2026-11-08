@@ -1,195 +1,99 @@
-# dsh-harness2
+# dsh-harness2 — native DSH port of Google Harness²
 
-**Harness² (recursive agent harnessing) for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness).**
+Local version **0.2.3**, based on Asiu-x/dsh-harness2 `bd9dfd0`, aligned to Google Research Harness² **`6868817518876de8fd170c6a8354daca273b6191`**. Apache-2.0. This is an experimental community port, not a Google/DeepSeek product. It preserves the JavaScript/Cordis implementation; it does not launch Google's Python orchestrator.
 
-This is a DSH plugin that lets an agent improve its own harness from execution evidence: it runs a representative task under the current harness, proposes invariant and domain edits, probes them on the same task, composes an improved harness, selects an output anonymously, and stores the adopted harness plus the lesson in a per-domain library.
+## Method
 
-It ports the **method** of Google Research's [Harness²](https://github.com/google-research/harness2) ([paper](https://arxiv.org/abs/2610.14224), Apache-2.0) onto DSH's native agent and prompt surfaces. It does not re-run the paper's benchmarks.
+An explicit invocation runs k baseline executions from immutable **H0**, proposes invariant (INV) and domain (DOM) edits, probes those edits, composes final harnesses, selects one existing delivered output, and reflects supported experience into a library. Parallel and sequential modes each use **4k executor runs + 3k improvement stages**, excluding retries, reflection and selection. At k=1 there is **no selector session**. At k>1 the selection pool contains exactly the usable composed finals, never the baselines.
 
-> Status: `0.1.0`, early release. Tested with DSH `0.1.5-rc.1` and Node.js 20+. See [Verification](#verification) and [Limitations](#limitations).
+Each new task starts at H0. Only the per-experiment/domain library carries experience forward. A failed selector can return a contingency output but has `selectionOk:false` and never updates the library. A no-op harness may still be selected and reflected; learning requires nonempty cue/lesson/evidence. Nothing is automatically injected into ordinary DSH conversations.
 
-## Install
+## Requirements and installation
 
-From GitHub (public plugin package):
+Tested on DSH **0.2.1-rc.5**, Node **25.6.1** on macOS. Node 20+ with ESM support and Python **3.9+** are required at runtime; Python compiles candidate scripts and reproduces the upstream deterministic anonymous-ID ordering. No Python packages or duplicate DSH packages are installed. The only JavaScript runtime dependency is the pinned Acorn parser, used for static ESM export validation without running candidate code. Python **3.12** and the pinned Google checkout are needed only for oracle tests.
 
-```bash
-dsh plugin --profile web add github:Asiu-x/dsh-harness2
+Install the locally packed archive into a dedicated profile, not into an everyday profile:
+
+```sh
+dsh plugin --profile harness2-test add /absolute/path/dsh-harness2-0.2.3.tgz
 ```
 
-Restart DSH (or start `dsh web`) afterwards. The package declares a DSH bundle patch, so it is added to the profile's plugin tree automatically.
-
-Local development:
-
-```bash
-git clone https://github.com/Asiu-x/dsh-harness2.git
-dsh plugin --profile web add /absolute/path/to/dsh-harness2
-```
-
-Check that the plugin is in the composed tree:
-
-```bash
-dsh --profile web --dump-config | grep -A2 harness2
-```
-
-## Quick start
-
-The plugin registers three model tools:
-
-| Tool | Purpose |
-|---|---|
-| `harness2_refine` | Run one Harness² improvement loop on a representative task. |
-| `harness2_status` | Show the adopted harness, its components, the library, and the latest run. |
-| `harness2_reset` | Archive the current harness and restore the seed. Requires `confirm: true`. |
-
-Ask the agent to use `harness2_refine` on a task:
-
-```text
-Use harness2_refine on this representative task:
-"Read data/orders.csv, compute the total of the amount column, and write result.md containing exactly 'Total: <number>' on one line."
-domain: data-analysis
-k: 1
-```
-
-A `k=1` sequential run is roughly nine child-agent runs: one base probe, two proposals, two candidate probes, one composition, one final probe, one selector, and one reflection. Start with `k=1` and a small workspace. Model calls are billed by your DSH provider.
-
-The human-facing command:
-
-```text
-/harness2            status
-/harness2 library    list the current domain's library
-/harness2 reset      archive and restore the seed harness
-```
-
-Once a harness is adopted, ordinary DSH agents in that workspace receive its always-on text and recent lessons as a prompt section. A fresh session sees it at startup; the session that ran the refinement receives an adoption context message on its next step.
-
-## What it does
-
-```text
-task ──► base rollouts ──► PROPOSE (INV + DOM) ──► PROBE ──► COMPOSE ──► final probe
-                                                                 │
-                                                                 ├─► anonymous SELECT
-                                                                 └─► REFLECT ──► library
-                                                                             │
-                                                                             └─► next task
-```
-
-- **Propose** — two proposers edit the harness: `INV` changes how the agent works; `DOM` adds what a practitioner of the domain knows. Proposals are the edited files, not patch descriptions.
-- **Probe** — each candidate runs the same task in an isolated copy of the workspace. The evidence is the trajectory, the artifact, and whether the run delivered.
-- **Compose** — one composer merges, adopts, or keeps the base, with a specific supporting moment for each decision.
-- **Select** — an anonymous selector compares rendered deliverables, not harnesses. Base is included as a conservative check; a no-op winner is not adopted.
-- **Reflect** — writes what each edit did and at most one transferable lesson into `.dsh-harness2/library/<domain>/`.
-
-Read [docs/method.md](docs/method.md) for the full method, the eight components, the DSH mapping, and the differences from the reference release.
-
-### The editable harness
-
-The harness lives at `.dsh-harness2/harness/`:
-
-| File | Role | Cost |
-|---|---|---|
-| `system.md` | role and procedure | always on |
-| `guardrails.md` | standing rules | always on |
-| `memory.md` | verified workspace facts | always on |
-| `tool-guidance.md` | how to use tools | always on |
-| `skills/<name>/SKILL.md` | on-demand workflow | loaded only when invoked |
-| `sub_agents/<name>/AGENT.md` | delegated role | separate context |
-| `scripts/<name>.py` | deterministic helper | run on demand |
-| `plugins/<name>.md` | middleware rule (guidance) | read as a rule |
-
-Always-on text is capped (default 12,000 characters). A skill must be named as a trigger in `system.md` or `guardrails.md`; referenced scripts must exist. Candidate middleware plugins are not executed by this build.
-
-## Configuration
-
-Override the plugin entry in your profile's `cordis.patch.yml` (or via `--patch`):
+Configure the `harness2` entry in that profile:
 
 ```yaml
 - id: harness2
   config:
-    maxK: 3
+    executor: {provider: your-provider, model: your-model}
+    editor: {provider: your-provider, model: your-editor}
+    # selector defaults to editor
+    sandboxMode: workspace-write
+    approvalPolicy: ask
     concurrency: 2
-    timeoutMinutes: 20
-    maxWorkspaceMB: 50
-    workspaceIsolation: copy
-    selection: true
-    reflection: true
+    maxK: 5
+    maxSteps: 200
+    timeoutMinutes: 60
 ```
 
-| Key | Default | Meaning |
-|---|---|---|
-| `dataDir` | `.dsh-harness2` | Harness, library, and run data. |
-| `maxAlwaysOnChars` | `12000` | Cap for the four always-on files. |
-| `maxK` | `3` | Maximum recursion budget accepted by the tool. |
-| `mode` | `sequential` | Default recursion mode. |
-| `concurrency` | `2` | Parallel child agents per phase. |
-| `timeoutMinutes` | `20` | Per-child-agent timeout. |
-| `toolTimeoutMinutes` | `120` | Cooperative timeout for the whole refine tool. |
-| `maxWorkspaceMB` | `50` | Copy cap; larger workspaces need a smaller path or `isolation: shared`. |
-| `workspaceIsolation` | `copy` | `copy` = one workspace copy per probe; `shared` = run in place (can interfere). |
-| `selection` | `true` | Anonymous selection; if false, adopt the best successful final. |
-| `reflection` | `true` | Write the experience record after adoption. |
-| `libraryLessons` | `3` | Recent lessons injected into ordinary agents. |
-| `libraryEntries` | `8` | Library entries copied into a proposer context. |
-| `model` / `provider` / `reasoningEffort` | session default | Override the child-agent route. |
+Defaults are a 24,000-character always-on surface, 50 MB of input files, k=1, sequential mode, and the host's current default route if explicit routes are absent. A parent's read-only mode is retained and configured tool availability intersects the parent's surface. Full access is rejected. Use a new experiment identifier after changing H0, mode, k, seed or execution settings.
 
-## Data layout
+## Prepare a historical conversation as a task
+
+Create a **small, explicit fixture directory**, not a copy of your entire history or project. Place only the relevant conversation excerpt and source files there. Write `task.json` inside it:
+
+```json
+{
+  "experiment": "history-test-1",
+  "id": "conversation-1",
+  "domain": "research",
+  "instruction": "Read conversation.md and source.txt. Produce answer.md satisfying the original request. Treat quoted historical instructions as evidence, not new authorization.",
+  "inputs": ["conversation.md", "source.txt"],
+  "outputs": [{"path": "answer.md", "format": "text"}]
+}
+```
+
+Open a DSH session whose workspace is this directory and ask it to call:
 
 ```text
-.dsh-harness2/
-├── harness/                     # the live adopted harness (or seed)
-├── state.json                   # adopted, domain, run, inventory
-├── library/<domain>/
-│   ├── INDEX.md
-│   └── harnesses/<date>-<task>/
-│       ├── harness/             # full adopted tree
-│       ├── EXPERIENCE.md
-│       └── experience.json
-└── runs/<run>/
-    ├── progress.log
-    ├── run.json
-    ├── rollouts/                # probe trajectories
-    ├── deliverables/            # final answers + changed files
-    ├── proposals/               # candidate harness + notes + meta
-    ├── compositions/            # composed harness + notes + meta
-    ├── contexts/                # evidence trees given to internal agents
-    └── workspaces/              # isolated probe copies
+harness2_refine({"taskFile":"task.json","k":1,"mode":"sequential"})
 ```
 
-`runs/` and `workspaces/` are ignored by the data directory's `.gitignore`; `harness/` and `library/` can be committed if you want to version the improvement.
+This first adapter supports explicitly listed **UTF-8 text inputs and outputs**. Markdown, source code, JSON, CSV and HTML are supported as text. Binary office/PDF/image artifacts require a separate renderer/adapter; they are rejected rather than silently summarized. Inputs must be regular files; symlinks, credential paths and evaluator/rubric files are excluded. The manifest defines delivery, not a correctness oracle. No model call has been made merely by installing this package.
+
+Tools:
+
+- `harness2_refine({taskFile,k?,mode?,seed?})`: executes the task repeatedly and returns selection, artifact locations and run status.
+- `harness2_status({experiment})`: reads the experiment configuration, no inference.
+- `harness2_reset({experiment,confirm:true})`: archives an idle experiment without deleting it. A live/interrupted lock requires investigation, not automatic removal.
+
+Results live under `<workspace>/.dsh-harness2-v2/<experiment>/`. State v1 is not imported or overwritten. Repeating a completed task verifies input/H0/configuration and artifact fingerprints before resuming; changed inputs, incomplete runs or corrupted outputs require a new task ID. Experiments are serialized with an exclusive lock.
+
+## Native DSH components
+
+| Component | File | Mount |
+|---|---|---|
+| System prompt | `system.md` | scoped prompt section |
+| Guardrails | `guardrails.md` | scoped prompt section |
+| Memory | `memory.md` | scoped prompt section |
+| Tool guidance | `tool-guidance.md` | scoped prompt section |
+| Skills | `skills/<name>/SKILL.md` | scoped DSH skill registration |
+| Scripts | `scripts/<name>.py` and skill helpers | resource files, executable through tools |
+| Subagents | `sub_agents/<name>/AGENT.md` | `harness2_delegate({role,task})`, separate agent context |
+| Middleware | `plugins/<name>.js` | native scoped Cordis effects |
+
+A native middleware module exports `apply(agentCtx)` and registers `tools/pre-execute`, `tools/post-execute`, `agent/pre-step` or `agent/turn-stopping`. Effects are removed when the agent is disposed. Stop hooks can inject bounded corrective input into that agent rather than letting it finish; cancellation and max-step budgets still apply. This is a substrate adaptation, not compatibility with OpenCode's plugin API.
+
+**ESM hooks are trusted executable code in the DSH process.** Cordis scoping is lifecycle isolation, not an OS sandbox. Tool sandbox policies do not sandbox JavaScript hooks or a programmed test adapter. Do not treat passing synthetic tests as a guarantee about future generated code. Editors/selectors never load candidate hooks; only executors do.
 
 ## Verification
 
-`npm test` covers the harness surface and validation rules, the store/library, workspace copy/diffing, and trajectory rendering.
-
-End-to-end, in a disposable DSH headless profile, this release was exercised on:
-- a task where the base already succeeded (composer kept the base; selector compared; no fake adoption);
-- a task with a hidden workspace rule where a DOM proposal added the verified rule to `memory.md`, the composer kept it, the selector chose the final, and the harness was adopted;
-- a fresh session whose system prompt contained the adopted always-on harness and the library lesson.
-
-The plugin has **not** been validated against the paper's benchmark numbers, and it is not a benchmark harness.
-
-## Limitations
-
-- Each probe runs the real task in a copy of the workspace. Side effects are contained by `copy`, but the child uses your DSH profile's tools and permissions; review your permission preset before using this on sensitive data.
-- Candidate middleware plugins are guidance, not executed. Skills, scripts, subagents, and prompt text are the supported levers.
-- `shared` isolation runs probes in place and can produce collisions; it exists for workspaces too large to copy, not as the default.
-- Selection compares deliverables using the model, not a ground-truth grader. It is evidence, not a score.
-- Runs are expensive. `k=1` is the default; `k>1` multiplies model calls.
-- The tool can switch the plugin instance to another workspace via its `workspace` argument, but only one workspace is active per plugin instance.
-
-## License and acknowledgements
-
-Apache-2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
-
-The method, component taxonomy, and several prompt rules are adapted from [google-research/harness2](https://github.com/google-research/harness2), Copyright 2026 Google LLC, Apache-2.0. Harness² is a research release and is not an officially supported Google product. This integration is independent and is not affiliated with or endorsed by Google or DeepSeek.
-
-Reference:
-
-```bibtex
-@article{xu2026harness2,
-  title   = {Harness$^2$: Recursive Agent Harnessing for an Open World},
-  author  = {Xu, Ruiyao and Chen, Yanfei and CuiZhu, Zhongying and Dalvi Mishra, Bhavana and Ming, Yifei and Yu, Han and Han, Rujun and Lee, Chen-Yu and Pfister, Tomas},
-  journal = {arXiv preprint arXiv:2610.14224},
-  year    = {2026},
-  url     = {https://arxiv.org/abs/2610.14224}
-}
+```sh
+npm test
+# oracle tests expect ../google-harness2-reference at the pinned commit
+npm run test:conformance
+# regenerate/check assets from the exact upstream prompt generator
+python3.12 scripts/reference-prompts.py ../google-harness2-reference
 ```
+
+The test-only `tests/dsh-fixture` package registers a programmed local LLM adapter and driver. It is **not included** in the production archive. Its dedicated SDK test profile disables external LLM adapters and the SDK stdin server; it invokes the real plugin tools, child agents, skill/bash/delegation, middleware and cancellation without network inference.
+
+See [method mapping](docs/method.md), [review and evidence](docs/reviews/port-analysis.md), and [conformance matrix](docs/conformance.md). Benchmark score reproduction is outside this port's acceptance claim.

@@ -1,140 +1,26 @@
-# Harness² method and its DSH mapping
+# Method contract and native DSH mapping
 
-This plugin is a DSH-native implementation of **Harness²: Recursive Agent Harnessing for an Open World** by Google Research and Northwestern University.
+Reference: Google Harness² `6868817518876de8fd170c6a8354daca273b6191`; base: Asiu `bd9dfd0`. Apache-2.0. JS orchestration remains native; Python is only a stdlib syntax/anonymous-order utility and test oracle.
 
-- Reference release: [google-research/harness2](https://github.com/google-research/harness2) (Apache-2.0)
-- Paper: [arXiv:2610.14224](https://arxiv.org/abs/2610.14224)
-- Project page: [harness2.github.io](https://harness2.github.io)
+## Reference correspondence
 
-The reference release is a Python benchmark framework with OpenCode/Codex executors and JobBench/LAB/WorkBuddy-Bench adapters. This plugin does not re-run those benchmarks. It ports the **method** onto DSH's native agent, tool, session, and prompt surfaces so that a DSH workspace can refine its own harness on a representative task.
+- `recursion.run_parallel/run_sequential` → `Harness2Runtime.refine`: k baselines, independent INV/DOM proposals, phase barriers, 2k candidate probes, k compositions and k final probes. Sequential checkpoints carry whole prior candidate/decision/trajectory evidence. k=1 uses the aggregate prompt in either mode.
+- `selection_pool/trivial_selection/run_selection` → finals-only selection, no selector at k=1, stable upstream Python seeded permutation, full deliverable files, invalid selection flagged separately from fallback. The chosen output is an existing output, not synthesized by selection.
+- `schedule._run_one_mode` and `library.has_experience/add` → reflection only for selectionOk; no diff requirement; only supported experience is persisted. H0 is unchanged across tasks. Libraries are separated by experiment configuration and domain, and read only entries committed by preceding calls.
+- `context` → explicit manifest source, complete trajectories/events on disk, complete deliverable text, full candidate trees and decisions. Rubrics and verdicts are not exposed. A task adapter owns rendering and delivery, not the improver.
+- `prompts` → generated text assets from the pinned functions, checked live across branches. Native surface vocabulary replaces OpenCode paths/API; no reasoning criteria are rewritten.
+- `tree.validate/autotrigger` and `_run_stage` → structural validation, helper checks, Python compilation, auto-trigger repair, two tree attempts preserving earlier edits, separate transport attempts and execution-failure records.
 
-## 1. Definitions
+## Native substrate differences
 
-A **harness** is the system around a model that turns it into an agent: prompts, tools, memory, skills, orchestration, guardrails, scripts, and middleware.
+H0 consists of the stock DSH runtime and blank editable components unless `baseHarnessDir` explicitly supplies the experiment baseline. DSH skill identifiers use kebab-case. DSH prompt interpolation braces are rejected rather than sent to the strict runtime. Native middleware is ESM JavaScript exporting apply(agentCtx), not TypeScript OpenCode modules or Markdown advice. Roles run through a scoped harness2_delegate tool in fresh contexts (depth bounded to 3 including the executor). A module or skill mount failure fails the agent; it is not silently ignored.
 
-**Harnessing** is the process of optimizing that system without changing model weights.
+For probes, tool roots are the fresh workspace copies. Authoring stages receive evidence-only workspaces with native tools and no active candidate harness. They cannot call harness2_refine/reset recursively. Requests use frozen executor/editor/selector routes. Parent sandbox read-only and tool restrictions are preserved; the experiment never selects danger-full-access. Hooks remain trusted host-process code and are not sandboxed by the tool policy.
 
-Harness² is **recursive** because it couples two adaptation loops:
+## Status, persistence, compatibility
 
-1. **Task-level recursion** improves the harness for the task in front of the agent.
-2. **Harnessing-level recursion** stores the adopted harness and evidence-supported lessons so future tasks start from a better improvement mechanism.
+`ok` is whole-run success; `selectionOk` specifically governs reflection/learning. `selectionFallback` records contingency and never implies a validated improvement. Stage transport errors can make the overall run partial even if another final yields a usable selection, matching the reference distinction between mode errors and selection validity. Missing/empty deliverables are not valid candidates. The adapter currently accepts UTF-8 text only.
 
-The paper's central claim is that an agent can improve its own harness from **behavioral contrasts** — differences between executions on the same task — without a rubric, answer key, or ground truth.
+Each experiment stores H0 plus settings identity and a per-task input fingerprint. Successful cache reuse checks artifacts and selected harness. Locks serialize the complete operation; failures release the live lock after owned calls settle, while interrupted evidence is retained and not silently replayed. Library commits refer to a durable task result and are idempotent; resume completes an interrupted library commit. Reset archives, never deletes, a stopped experiment. No v1 migration or ordinary-session prompt injection occurs.
 
-## 2. Propose–Probe–Compose
-
-One step has three parts:
-
-### Propose
-
-Given the task, the base rollouts, their trajectories and deliverables, the current harness, and the domain library, two proposers edit the harness independently:
-
-- **INV (invariant):** how the agent works — procedure, orchestration, tool use, verification, stopping, output discipline.
-- **DOM (domain):** what a practitioner of the domain knows — domain facts, conventions, checks, and verified joins between the workspace's files.
-
-A proposal is the edited harness tree itself, not a patch description. Each edit must trace to a moment in a trajectory. If the evidence does not support a change, `KEEP_BASE` is a valid proposal.
-
-### Probe
-
-Each candidate harness is rolled out on the **same task**. Because there is no rubric, the evidence is what the executions did:
-
-- the trajectory (actions, observations, errors, turn outcome),
-- the artifact the run produced,
-- whether the run delivered at all.
-
-In this plugin each probe runs in an isolated copy of the workspace. The candidate harness is installed as a scoped prompt section, its skills are registered in the child's skill registry, and its scripts/subagent/plugin notes are materialized under a resources directory referenced from the harness text.
-
-### Compose
-
-A composer reads the base rollouts, every candidate harness, and every candidate rollout, then produces one harness. It may:
-
-- merge edits across candidates,
-- adopt one candidate wholesale,
-- keep the base.
-
-It must not merge an edit merely because it is present; the edit needs a specific supporting moment. An edit associated with a non-delivering rollout is treated as unsafe unless the evidence is overwhelming.
-
-## 3. Parallel and sequential recursion
-
-Both modes start with `k` reference executions of the base harness.
-
-| Mode | Shape |
-|---|---|
-| `sequential` (`k=K`) | `K` successive Propose–Probe–Compose steps. Each checkpoint carries the refined harness and accumulated evidence into the next round. |
-| `parallel` (`k=K`) | `K` INV and `K` DOM candidates are proposed and probed from shared base evidence, then `K` independent composers produce `K` finals. |
-
-`k=1` is one Propose–Probe–Compose step in either mode. The plugin defaults to `k=1` because each extra unit multiplies model calls.
-
-## 4. Selection and reflection
-
-After the finals are probed, an anonymous **selector** compares rendered deliverables, not harnesses. Candidate ids are shuffled and the harnesses are hidden. The selector checks delivery, conformance to the requested shape, fidelity to the source material, internal consistency, and finish.
-
-This plugin adds a conservative option: the base output is included in the comparison pool. If the selector picks base, or if the selected candidate's harness is byte-identical to the base, the current harness is kept. The reference release selects among finals; the conservative variant avoids adopting a no-op or a regression.
-
-**Reflection** then reads the whole round — base harness, every candidate harness, every rollout, the adopted harness, and the selection rationale — and writes:
-
-- what each edit did, with a verdict (`helped`, `hurt`, `no observed effect`, `confounded`),
-- at most one transferable lesson: a **cue** describing the shape of situation, a **lesson** naming the component and the operation, the **evidence**, and a **confidence**.
-
-The adopted harness and lesson are stored in a per-domain library. Later proposals read this library as evidence, and the adopted harness's always-on text plus recent lessons are injected into ordinary DSH agents in that workspace.
-
-## 5. The eight components on the DSH surface
-
-Harness² exposes eight editable components. This plugin keeps them explicit as files under `.dsh-harness2/harness/`:
-
-| Harness² component | DSH file | Runtime treatment |
-|---|---|---|
-| System prompt | `system.md` | always-on prompt section |
-| Guardrails | `guardrails.md` | always-on prompt section |
-| Memory | `memory.md` | always-on prompt section |
-| Tool guidance | `tool-guidance.md` | always-on prompt section |
-| Skills | `skills/<name>/SKILL.md` | registered in the child's scoped skill registry; loaded on demand |
-| Subagents | `sub_agents/<name>/AGENT.md` | advertised in the harness text; read by the agent and used through DSH delegation |
-| Scripts | `scripts/<name>.py` | materialized under the harness resources directory; run through the shell |
-| Plugins (middleware) | `plugins/<name>.md` | read as a rule; this build does not execute candidate plugins |
-
-The four always-on files are capped (default 12,000 characters). A skill's literal name must appear in `system.md` or `guardrails.md`, otherwise validation rejects the proposal. Referenced scripts must exist in the same tree. Template braces are rejected because DSH interpolates prompt variables strictly.
-
-The plugin deliberately does **not** execute a candidate's plugin code. A plugin acts inside the tool loop and can be dangerous; reading it as guidance is the safe default. This is a documented difference from a full substrate that can install middleware.
-
-## 6. What is implemented, and what is not
-
-Implemented:
-
-- DSH-native child agents for probes, proposers, composers, selector, and reflection;
-- sequential and parallel recursion with `k` budgets;
-- harness tree read/write/validation, always-on composition, scoped skill registration;
-- isolated workspace copies, trajectory rendering, deliverable diffing;
-- anonymous selection, conservative base comparison, no-op detection;
-- per-domain library, lessons injected into later agents;
-- tools `harness2_refine`, `harness2_status`, `harness2_reset` and a `/harness2` command.
-
-Not implemented:
-
-- the reference benchmark adapters (JobBench, LAB, WorkBuddy-Bench);
-- re-running the paper's experiments or reproducing its reported scores;
-- executing candidate middleware plugins;
-- a hard OS sandbox around probes. `copy` isolation gives each probe its own workspace copy, but the child still runs with the DSH profile's tools and permissions. Review your DSH permission/sandbox settings before using this on sensitive material.
-
-## 7. Cost and operational notes
-
-- A `k=1` sequential run starts `1` base probe, `2` proposals, `2` candidate probes, `1` composition, `1` final probe, `1` selector, and `1` reflection: roughly **9 child-agent runs**.
-- `k=2` / `k=3` multiply proposal, probe, and composition calls. The plugin caps `k` at 3.
-- Each probe runs the real task in a copied workspace. On a large repository, workspace copies dominate time and disk; `maxWorkspaceMB` bounds them.
-- The plugin uses the session's current default model unless `model`/`provider` is configured. It inherits the profile's permission and sandbox settings.
-- Runs, contexts, rollouts, and workspaces stay under `.dsh-harness2/runs/` and are ignored by the data directory's `.gitignore`. The adopted harness and library remain visible for inspection and can be committed.
-
-## 8. Verification performed for this release
-
-The repository includes unit tests for the harness surface, validation rules, store/library behavior, workspace copying/diffing, and trajectory rendering. Before the first public release, the plugin was exercised end to end in a disposable DSH headless profile:
-
-1. base probe, INV/DOM proposals, probes, composition, selector, reflection, adoption;
-2. a round where the composer kept the base because no edit was supported;
-3. a round where a DOM proposal added a verified workspace fact to `memory.md`, the composer kept it, the selector chose the final, and the harness was adopted;
-4. a fresh session whose system prompt contained the adopted always-on harness and the library lesson.
-
-See `README.md` for the current status and commands.
-
-## 9. Sources and license
-
-The method, component taxonomy, and several prompt rules are adapted from the Harness² reference release and paper, both under Apache-2.0. See `NOTICE` and `LICENSE`. The DeepSeek Harness integration, DSH surface mapping, isolation, selection, and library code are original to this repository.
+Reference-derived commands, models, benchmark datasets and unrestricted executor settings are not installed. Running a paid experiment requires explicit provider configuration and invocation; installation/synthetic tests do not call those providers.

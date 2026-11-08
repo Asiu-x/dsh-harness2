@@ -2,3 +2,4 @@ node_modules/
 *.log
 .DS_Store
 .dsh-harness2/
+.dsh-harness2-v2/
