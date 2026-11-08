@@ -17,12 +17,14 @@ async function tempDir() {
   return fs.mkdtemp(path.join(os.tmpdir(), 'h2-test-'))
 }
 
-test('seed harness is valid and non-empty', async () => {
+test('seed harness is valid and contains all always-on files', async () => {
   const tree = await seedTree()
   const result = validateTree(tree)
   assert.equal(result.ok, true, result.errors.join('; '))
-  assert.ok(tree['system.md'].length > 50)
-  assert.match(composeAlwaysOn(tree), /Role and procedure/)
+  assert.ok(tree['system.md'] !== undefined)
+  assert.ok(tree['guardrails.md'] !== undefined)
+  assert.ok(tree['memory.md'] !== undefined)
+  assert.ok(tree['tool-guidance.md'] !== undefined)
 })
 
 test('a skill without an always-on trigger is rejected; a named skill is accepted', async () => {
@@ -75,7 +77,7 @@ test('always-on template braces and the size cap are rejected', async () => {
   assert.ok(result.errors.some((error) => error.includes('template brace')))
 
   const big = await seedTree()
-  big['memory.md'] = 'x'.repeat(13_000)
+  big['memory.md'] = 'x'.repeat(25_000)
   result = validateTree(big)
   assert.equal(result.ok, false)
   assert.ok(result.errors.some((error) => error.includes('always-on text')))

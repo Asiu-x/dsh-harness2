@@ -1,7 +1,7 @@
 {
   "name": "dsh-harness2",
-  "version": "0.2.3",
-  "description": "Harness\u00b2 (recursive agent harnessing) for DeepSeek Harness: Propose\u2013Probe\u2013Compose self-improvement as a DSH plugin.",
+  "version": "0.2.4",
+  "description": "Harness² (recursive agent harnessing) for DeepSeek Harness: Propose–Probe–Compose self-improvement as a DSH plugin.",
   "type": "module",
   "main": "index.js",
   "files": [
@@ -14,7 +14,9 @@
     "LICENSE",
     "NOTICE",
     "docs",
-    "scripts/reference-prompts.py"
+    "tests",
+    "scripts/reference-prompts.py",
+    "scripts/legacy-assign-ids.py"
   ],
   "keywords": [
     "dsh-plugin",
@@ -27,12 +29,12 @@
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Asiu-x/dsh-harness2.git"
+    "url": "git+https://github.com/ddtavares/dsh-harness2.git"
   },
   "bugs": {
-    "url": "https://github.com/Asiu-x/dsh-harness2/issues"
+    "url": "https://github.com/ddtavares/dsh-harness2/issues"
   },
-  "homepage": "https://github.com/Asiu-x/dsh-harness2#readme",
+  "homepage": "https://github.com/ddtavares/dsh-harness2#readme",
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"

@@ -1,21 +1,21 @@
 # dsh-harness2 — native DSH port of Google Harness²
 
-Local version **0.2.3**, based on Asiu-x/dsh-harness2 `bd9dfd0`, aligned to Google Research Harness² **`6868817518876de8fd170c6a8354daca273b6191`**. Apache-2.0. This is an experimental community port, not a Google/DeepSeek product. It preserves the JavaScript/Cordis implementation; it does not launch Google's Python orchestrator.
+Local version **0.2.4**, based on Asiu-x/dsh-harness2 `bd9dfd0`, aligned to Google Research Harness² **`6868817518876de8fd170c6a8354daca273b6191`**. Apache-2.0. This is an experimental community port, not a Google/DeepSeek product. It preserves the JavaScript/Cordis implementation; it does not launch Google's Python orchestrator.
 
 ## Method
 
 An explicit invocation runs k baseline executions from immutable **H0**, proposes invariant (INV) and domain (DOM) edits, probes those edits, composes final harnesses, selects one existing delivered output, and reflects supported experience into a library. Parallel and sequential modes each use **4k executor runs + 3k improvement stages**, excluding retries, reflection and selection. At k=1 there is **no selector session**. At k>1 the selection pool contains exactly the usable composed finals, never the baselines.
 
-Each new task starts at H0. Only the per-experiment/domain library carries experience forward. A failed selector can return a contingency output but has `selectionOk:false` and never updates the library. A no-op harness may still be selected and reflected; learning requires nonempty cue/lesson/evidence. Nothing is automatically injected into ordinary DSH conversations.
+Each new task starts at H0. Only the per-experiment/domain library carries experience forward. A failed selector can return a contingency output but has `selectionOk:false` and never updates the library. A no-op harness may still be selected and reflected; learning requires nonempty cue/lesson/evidence. Nothing is automatically injected into ordinary DSH conversations. Candidate ID ordering runs natively in JavaScript via deterministic SHA-1 seeded Mulberry32 PRNG (non-blocking in-memory execution).
 
 ## Requirements and installation
 
-Tested on DSH **0.2.1-rc.5**, Node **25.6.1** on macOS. Node 20+ with ESM support and Python **3.9+** are required at runtime; Python compiles candidate scripts and reproduces the upstream deterministic anonymous-ID ordering. No Python packages or duplicate DSH packages are installed. The only JavaScript runtime dependency is the pinned Acorn parser, used for static ESM export validation without running candidate code. Python **3.12** and the pinned Google checkout are needed only for oracle tests.
+Tested on DSH **0.2.1-rc.5**, Node **25.6.1** on macOS. Node 20+ with ESM support is required. Candidate anonymous-ID ordering executes purely in JavaScript without blocking the event loop (optional external script execution is supported via `assignIdsScript`). Python **3.9+** compiles candidate Python scripts when present. The only JavaScript runtime dependency is the pinned Acorn parser, used for static ESM export validation without running candidate code.
 
 Install the locally packed archive into a dedicated profile, not into an everyday profile:
 
 ```sh
-dsh plugin --profile harness2-test add /absolute/path/dsh-harness2-0.2.3.tgz
+dsh plugin --profile harness2-test add /absolute/path/dsh-harness2-0.2.4.tgz
 ```
 
 Configure the `harness2` entry in that profile:
