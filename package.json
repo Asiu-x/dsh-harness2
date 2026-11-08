@@ -1,6 +1,6 @@
 {
   "name": "dsh-harness2",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "description": "Harness² (recursive agent harnessing) for DeepSeek Harness: Propose–Probe–Compose self-improvement as a DSH plugin.",
   "type": "module",
   "main": "index.js",
@@ -45,7 +45,7 @@
   },
   "scripts": {
     "test": "node --test tests/*.test.js",
-    "test:conformance": "node --test tests/conformance.test.js"
+    "test:conformance": "node --test tests/ordering.test.js tests/orchestration.test.js tests/surface.test.js tests/validation.test.js tests/store.test.js"
   },
   "author": "Asiu-x",
   "dependencies": {

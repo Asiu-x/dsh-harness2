@@ -13,8 +13,12 @@ import {
   writeTree,
 } from '../lib/surface.js'
 
-async function tempDir() {
-  return fs.mkdtemp(path.join(os.tmpdir(), 'h2-test-'))
+async function tempDir(t) {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'h2-test-'))
+  t.after(async () => {
+    await fs.rm(dir, { recursive: true, force: true })
+  })
+  return dir
 }
 
 test('seed harness is valid and contains all always-on files', async () => {
@@ -83,8 +87,8 @@ test('always-on template braces and the size cap are rejected', async () => {
   assert.ok(result.errors.some((error) => error.includes('always-on text')))
 })
 
-test('off-surface files are collected by readTree and rejected by writeTree', async () => {
-  const dir = await tempDir()
+test('off-surface files are collected by readTree and rejected by writeTree', async (t) => {
+  const dir = await tempDir(t)
   await fs.mkdir(path.join(dir, 'notes'), { recursive: true })
   await fs.writeFile(path.join(dir, 'system.md'), '# ok\n')
   await fs.writeFile(path.join(dir, 'notes', 'private.txt'), 'nope')
@@ -93,7 +97,6 @@ test('off-surface files are collected by readTree and rejected by writeTree', as
   assert.deepEqual(rejected, ['notes/private.txt'])
 
   await assert.rejects(() => writeTree(dir, { ...tree, 'notes/x.md': 'x' }), /off-surface/)
-  await fs.rm(dir, { recursive: true, force: true })
 })
 
 test('frontmatter parsing and tree diffs', () => {

@@ -32,7 +32,7 @@ test('hasApplyFunction rejects missing or non-function apply exports', () => {
   assert.equal(hasApplyFunction('export const apply = "string";'), false)
 })
 
-test('hasApplyFunction rejects reassignments and mutations of apply binding', () => {
+test('hasApplyFunction rejects reassignments, mutations, and nested var hoisting of apply binding', () => {
   // Reassignment to variable
   const code1 = `
     let apply = () => {};
@@ -56,9 +56,38 @@ test('hasApplyFunction rejects reassignments and mutations of apply binding', ()
     export { apply };
   `
   assert.equal(hasApplyFunction(code3), false)
+
+  // Nested block var hoisting overwrite (Audit finding A3)
+  const code4 = `
+    export var apply = () => {};
+    { var apply = 5; }
+  `
+  assert.equal(hasApplyFunction(code4), false)
+
+  // Conditional block var hoisting overwrite
+  const code5 = `
+    export var apply = () => {};
+    if (true) var apply = 5;
+  `
+  assert.equal(hasApplyFunction(code5), false)
+
+  // Duplicate top-level var declaration
+  const code6 = `
+    var apply = 5;
+    export var apply = () => {};
+  `
+  assert.equal(hasApplyFunction(code6), false)
+
+  // Alias redeclaration in nested block
+  const code7 = `
+    var fn = () => {};
+    export const apply = fn;
+    { var fn = 42; }
+  `
+  assert.equal(hasApplyFunction(code7), false)
 })
 
-test('validateExecutableTree checks Python syntax and plugin AST', async () => {
+test('validateExecutableTree checks Python syntax asynchronously and plugin AST in-memory', async () => {
   const tree = await seedTree()
 
   // Valid Python script
@@ -84,6 +113,12 @@ test('validateExecutableTree checks Python syntax and plugin AST', async () => {
   result = await validateExecutableTree(tree)
   assert.equal(result.ok, false)
   assert.ok(result.errors.some((e) => e.includes('plugins/bad-plugin.js')))
+
+  // Plugin with nested var hoisting bypass
+  tree['plugins/bad-plugin.js'] =
+    'export var apply = () => {}; { var apply = 5; }\n'
+  result = await validateExecutableTree(tree)
+  assert.equal(result.ok, false)
 })
 
 test('assertEvidence detects grader verdict markers and throws', () => {

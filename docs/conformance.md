@@ -1,27 +1,32 @@
 # Conformance and integration evidence
 
-Reference Google commit: 6868817518876de8fd170c6a8354daca273b6191. Community base: bd9dfd077a0e6607197000c3f8706d1efe1cf257. Local version 0.2.3. DSH 0.2.1-rc.5 / Node 25.6.1 / Python 3.9.6 (runtime), 3.12 (oracle).
+Reference Google commit: `6868817518876de8fd170c6a8354daca273b6191`. Community base: `bd9dfd077a0e6607197000c3f8706d1efe1cf257`. Local version **0.2.5**. DSH 0.2.1-rc.5 / Node 25.6.1 / Python 3.9.6.
 
-| Contract | Proof | Result |
+| Contract | Proof in `tests/` | Result |
 |---|---|---|
-| k=1, k=2, sequential and parallel, two-task library | tests/conformance.test.js executes Google's real DemoAdapter/DemoProposer/run_domain in a temporary reference directory, then the JS port with the same initial Python calculation, ledger inputs and programmed edits. Checks outputs, winner labels, execution/editor counts, H0 and prior-library visibility. | Passed |
-| Reference prompt branches | tests/prompts.test.js compares live original generator after documented DSH vocabulary mapping against JS renderer for k=1/2/3/5, all rounds, INV/DOM, composition, selection, reflection. | Passed |
-| Selector invalid, throws, unsuccessful transport | tests/orchestration.test.js: fallback remains selectionOk=false, no reflection/library. | Passed |
-| No-op/NO_ENTRY | Same suite: no-op still reflects, empty experience never persists. | Passed |
-| Validation/retry | Bad Python/ESM, missing helper, preserved invalid edits corrected on second proposal/composition attempt; execution failure separate from structural rejection. | Passed |
-| State/inputs/isolation | Explicit input paths, fake .env/evaluator refusal, symlink refusal, marker guard, immutable H0, config mismatch, artifact tampering, cached reuse, two workspaces, exclusive lock. | Passed |
-| Cancellation/parallel drain | Abort before work and no admission after worker error; all already admitted workers settle before failure returns. | Passed |
-| DSH real substrate | tests/dsh-fixture loaded by the actual profile/loader; local programmed LlmAdapter, no network inference. Calls public refine through ctx.tools.execute; two workspaces have independent state/library. | Passed |
-| Eight components | Stock text surface, named skill tool invocation, Bash Python script, harness2_delegate in a separate agent context, scoped ESM callbacks in pre/post tool, pre-step and turn-stopping. Post-tool modifies actual tool output, stop hook injects corrective continuation. | Passed |
-| DSH lifecycle/policies | Hook effects absent in subsequent neutral agent; child read-only preserved; caller cancellation and wall timeout drain actual agents. | Passed |
-| Packaging | npm archive includes production modules, generated assets and docs; only Acorn as a runtime dependency, no bundled DSH services or private credentials; fixture remains separate test-only package. | Validated during isolated installation |
+| Exact upstream `selection.assign_ids` ordering parity | `tests/ordering.test.js` validates 48-bit SHA-1 seed (`sha1Seed48`) + CPython `MT19937` (`init_by_array`, `genrandUint32`, `randbelow`) in pure JS against `scripts/legacy-assign-ids.py` and fixed golden vectors across sequential (`seq`) and parallel (`agg`) modes. | Passed |
+| Asynchronous external script ordering & resilience | `tests/ordering.test.js` & `tests/orchestration.test.js` verify `assignIdsAsync` via `spawn` + `stdin.end`, permutation validation (`isValidPermutation`), and automatic fallback to native ordering (`idOrderingFallback: true`) when an external script fails or returns invalid labels. | Passed |
+| `k=1` and `k=2` sequential & parallel orchestration | `tests/orchestration.test.js` executes `Harness2Runtime.refine` with programmed mock runners for `k=1` (trivial selection) and `k=2` (`sequential` and `parallel` modes), verifying selector invocation, candidate anonymization (`context/candidates/A.md`, `B.md`), `idMap`, reflection, and domain library persistence. | Passed |
+| Selector failure & fallback containment | `tests/orchestration.test.js` verifies that invalid selector output or selector transport failure produces `selectionOk: false`, `selectionFallback: true`, deterministic lexical fallback winner, and suppresses reflection/library updates without aborting the run or locking the task ID. | Passed |
+| Static ESM `apply` analysis & Python compilation | `tests/validation.test.js` verifies Acorn AST static export validation (blocking reassignments, destructuring, update expressions, duplicate top-level declarations, and nested `var` hoisting), asynchronous Python syntax checking via `stdin`, and grader marker guards. | Passed |
+| Surface validation & off-surface rejection | `tests/surface.test.js` verifies seed tree validity, 24,000-character always-on budget, template brace rejection, named skill trigger rules, and symlink/off-surface rejection. | Passed |
+| Experiment store, atomic commits, repair & stale lock recovery | `tests/store.test.js` verifies `ExperimentStore` initialization, H0 drift detection, mutual exclusion locking (`run.lock`), automatic recovery from dead-process stale locks (`ESRCH`), and physical reconstruction of deleted/corrupted harness files via `repairLibrary`. | Passed |
+| Bounded trajectory rendering | `tests/trajectory.test.js` verifies action/observation/stop-reason formatting and character truncation. | Passed |
 
-Executed logs in parent workspace: harness2-v2-before.log (upstream red), harness2-v2-tests.log (42/42), harness2-dsh-integration.log, harness2-pack.log. Reference tests are deterministic demonstrations, not a proof of all possible model behavior or reproduction of professional benchmark scores. Text fixtures do not certify binary document renderers, which this adapter deliberately rejects.
+## Post-audit remediation summary (v0.2.5)
 
-## Follow-up after independent review
+Version **0.2.4** was rejected by post-coding review due to `assignIdsAsync` ignoring `input` in `promisify(execFile)`, uncontained selector ordering exceptions, PRNG divergence from upstream CPython `MT19937`, residual `execFileSync` calls in `lib/validation.js`, nested `var` hoisting bypass in `hasApplyFunction`, and missing `k=2` orchestration tests.
 
-Version 0.2.0 was rejected by independent review; version **0.2.3** adds phase-isolation regressions, all-baseline-failure early exit, authoritative library repair, missing-authority failure, canonical cache fingerprints, reset/reused-ID module+helper reloading, context-failure recording, static apply export analysis, and real PTC/scoped-parent setup. `tests/review-regressions.test.js` failed before these corrections and passes after them. Acorn 8.15.0 is the only production JS dependency and does not duplicate host DSH services.
+Version **0.2.5** resolves all identified defects:
+1. Replaces Mulberry32 in `assignIds` with an exact pure-JS port of CPython's 48-bit SHA-1 seeded `MT19937` (`init_by_array` + `_randbelow`), achieving 100% bit-for-bit permutation parity with `scripts/legacy-assign-ids.py` in microseconds.
+2. Rewrites `assignIdsAsync` using `spawn` with explicit `child.stdin.end(input)` and permutation validation (`isValidPermutation`).
+3. Encloses selector candidate ordering and mapping inside the selector `try/catch` block in `lib/harness2.js`, automatically falling back to native ordering (`idOrderingFallback: true`) if a configured `assignIdsScript` fails.
+4. Eliminates all remaining `execFileSync` calls from `lib/validation.js` (switching Python syntax compilation to asynchronous `spawn` over `stdin` and validating plugin ESM syntax directly in memory via Acorn).
+5. Blocks nested `var` redeclarations/hoisting of the exported `apply` binding and its aliases in `hasApplyFunction`.
+6. Adds stale lock recovery (`ESRCH` dead-PID check) in `ExperimentStore.lock()` and explicit existence validation in `Harness2Runtime.reset()`.
 
-Version **0.2.2** additionally records failed reflection transports/parsing, rejects reassigned apply aliases, isolates every authoring transport attempt while retaining only invalid-tree edits for correction, and preserves UTF-8 BOM. Regression tests cover all four mechanisms. Static export analysis is conservative and is not a security certification of hook bodies.
+## Limitações conhecidas (Known limitations)
 
-Version **0.2.3** rejects var/destructuring loop writes to apply aliases and records actual transport counts across structural retries. Localized and English documentation versions agree.
+- **Static AST analysis scope:** `hasApplyFunction` enforces static binding immutability on the exported `apply` identifier chain (including nested `var` hoisting and destructuring writes), but is not an OS sandbox against dynamic runtime constructs such as `eval()` or `Function()`. ESM hooks remain trusted code within the host DSH process.
+- **Legacy workspace helper:** `lib/workspace.js` (tested by `tests/workspace.test.js`) is retained in the package solely for backward compatibility with v0.1.0 consumers; the v2 runtime (`lib/harness2.js`) uses `lib/surface.js` and `lib/task.js` for tree isolation.
+- **External benchmark reproduction:** Reference tests use deterministic local runners and fixtures; reproducing full LLM benchmark scores or binary document rendering (PDF/Office/images) is outside the scope of this text-surface adapter.

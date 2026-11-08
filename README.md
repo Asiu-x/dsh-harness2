@@ -1,21 +1,21 @@
 # dsh-harness2 — native DSH port of Google Harness²
 
-Local version **0.2.4**, based on Asiu-x/dsh-harness2 `bd9dfd0`, aligned to Google Research Harness² **`6868817518876de8fd170c6a8354daca273b6191`**. Apache-2.0. This is an experimental community port, not a Google/DeepSeek product. It preserves the JavaScript/Cordis implementation; it does not launch Google's Python orchestrator.
+Local version **0.2.5**, based on Asiu-x/dsh-harness2 `bd9dfd0`, aligned to Google Research Harness² **`6868817518876de8fd170c6a8354daca273b6191`**. Apache-2.0. This is an experimental community port, not a Google/DeepSeek product. It preserves the JavaScript/Cordis implementation; it does not launch Google's Python orchestrator.
 
 ## Method
 
 An explicit invocation runs k baseline executions from immutable **H0**, proposes invariant (INV) and domain (DOM) edits, probes those edits, composes final harnesses, selects one existing delivered output, and reflects supported experience into a library. Parallel and sequential modes each use **4k executor runs + 3k improvement stages**, excluding retries, reflection and selection. At k=1 there is **no selector session**. At k>1 the selection pool contains exactly the usable composed finals, never the baselines.
 
-Each new task starts at H0. Only the per-experiment/domain library carries experience forward. A failed selector can return a contingency output but has `selectionOk:false` and never updates the library. A no-op harness may still be selected and reflected; learning requires nonempty cue/lesson/evidence. Nothing is automatically injected into ordinary DSH conversations. Candidate ID ordering runs natively in JavaScript via deterministic SHA-1 seeded Mulberry32 PRNG (non-blocking in-memory execution).
+Each new task starts at H0. Only the per-experiment/domain library carries experience forward. A failed selector can return a contingency output but has `selectionOk:false` and never updates the library. A no-op harness may still be selected and reflected; learning requires nonempty cue/lesson/evidence. Nothing is automatically injected into ordinary DSH conversations. Candidate ID ordering runs natively in JavaScript via an exact port of CPython's 48-bit SHA-1 seeded Mersenne Twister (`MT19937` + `_randbelow`), preserving 100% bit-for-bit parity with upstream `selection.assign_ids` without blocking the event loop.
 
 ## Requirements and installation
 
-Tested on DSH **0.2.1-rc.5**, Node **25.6.1** on macOS. Node 20+ with ESM support is required. Candidate anonymous-ID ordering executes purely in JavaScript without blocking the event loop (optional external script execution is supported via `assignIdsScript`). Python **3.9+** compiles candidate Python scripts when present. The only JavaScript runtime dependency is the pinned Acorn parser, used for static ESM export validation without running candidate code.
+Tested on DSH **0.2.1-rc.5**, Node **25.6.1** on macOS. Node 20+ with ESM support is required. Candidate anonymous-ID ordering executes purely in JavaScript without blocking the event loop (optional external script execution is supported via `assignIdsScript` with automatic fallback to native ordering on script failure). Python **3.9+** compiles candidate Python scripts asynchronously when present. The only JavaScript runtime dependency is the pinned Acorn parser, used for static ESM export validation without running candidate code.
 
 Install the locally packed archive into a dedicated profile, not into an everyday profile:
 
 ```sh
-dsh plugin --profile harness2-test add /absolute/path/dsh-harness2-0.2.4.tgz
+dsh plugin --profile harness2-test add /absolute/path/dsh-harness2-0.2.5.tgz
 ```
 
 Configure the `harness2` entry in that profile:
@@ -88,12 +88,10 @@ A native middleware module exports `apply(agentCtx)` and registers `tools/pre-ex
 
 ```sh
 npm test
-# oracle tests expect ../google-harness2-reference at the pinned commit
+# run conformance and integration test suite
 npm run test:conformance
 # regenerate/check assets from the exact upstream prompt generator
-python3.12 scripts/reference-prompts.py ../google-harness2-reference
+python3 scripts/reference-prompts.py ../google-harness2-reference
 ```
-
-The test-only `tests/dsh-fixture` package registers a programmed local LLM adapter and driver. It is **not included** in the production archive. Its dedicated SDK test profile disables external LLM adapters and the SDK stdin server; it invokes the real plugin tools, child agents, skill/bash/delegation, middleware and cancellation without network inference.
 
 See [method mapping](docs/method.md), [review and evidence](docs/reviews/port-analysis.md), and [conformance matrix](docs/conformance.md). Benchmark score reproduction is outside this port's acceptance claim.
