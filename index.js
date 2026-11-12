@@ -185,7 +185,6 @@ export function apply(ctx, rawConfig) {
                       runtime.adoptedText,
                   },
                 ],
-                source: { kind: 'plugin', plugin: 'dsh-harness2' },
               }),
             )
           } catch (error) {
