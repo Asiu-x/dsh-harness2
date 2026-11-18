@@ -6,7 +6,7 @@
 
 这是对论文方法的 DSH 原生实现，不是论文基准（JobBench / LAB / WorkBuddy-Bench）的复现。论文：[arXiv:2610.14224](https://arxiv.org/abs/2610.14224)。
 
-> 状态：`0.1.0` 早期版本，已在 DSH `0.1.5-rc.1` + Node.js 20+ 上验证。详见 [方法说明](docs/method.md)。
+> 状态：`0.1.1` 早期版本，已在 DSH `0.1.5-rc.1` + Node.js 20+ 上验证。详见 [方法说明](docs/method.md)。
 
 ## 安装
 

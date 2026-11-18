@@ -1,6 +1,6 @@
 {
   "name": "dsh-harness2",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Harness² (recursive agent harnessing) for DeepSeek Harness: Propose–Probe–Compose self-improvement as a DSH plugin.",
   "type": "module",
   "main": "index.js",

@@ -6,7 +6,7 @@ This is a DSH plugin that lets an agent improve its own harness from execution e
 
 It ports the **method** of Google Research's [Harness²](https://github.com/google-research/harness2) ([paper](https://arxiv.org/abs/2610.14224), Apache-2.0) onto DSH's native agent and prompt surfaces. It does not re-run the paper's benchmarks.
 
-> Status: `0.1.0`, early release. Tested with DSH `0.1.5-rc.1` and Node.js 20+. See [Verification](#verification) and [Limitations](#limitations).
+> Status: `0.1.1`, early release. Tested with DSH `0.1.5-rc.1` and Node.js 20+. See [Verification](#verification) and [Limitations](#limitations).
 
 ## Install
 
